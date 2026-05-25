@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>劳保用品选购系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box;font-family:Microsoft Yahei,sans-serif;}
+        body{background:#f5f7fa;padding:15px;}
+        .container{max-width:1000px;margin:0 auto;background:#fff;border-radius:8px;box-shadow:0 2px 12px #ddd;}
+        .login-box{padding:40px 20px;text-align:center;}
+        .hide{display:none;}
+        h2{color:#333;margin-bottom:25px;}
+        input{width:100%;max-width:280px;padding:12px;border:1px #ccc solid;border-radius:4px;margin:8px 0;font-size:15px;}
+        button{padding:10px 18px;background:#2d8cf0;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;margin:5px;}
+        button:hover{background:#1b76d8;}
+        .del-btn{background:#f53f3f;}
+        .export-btn{background:#00b42a;margin-bottom:15px;}
+        .submit-btn{background:#19be6b;}
+        .refresh-btn{background:#ff9900;}
+        .header{padding:15px;background:#2d8cf0;color:#fff;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;}
+        .goods-wrap{padding:15px;display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:15px;}
+        .goods-item{border:1px #eee solid;padding:12px;border-radius:6px;}
+        .goods-name{font-weight:bold;margin:6px 0;}
+        .price{color:red;margin-bottom:8px;}
+        .total-box{padding:15px;font-size:16px;font-weight:bold;background:#f0f7ff;margin:10px 15px;border-radius:6px;}
+        .record-box{margin:20px 15px;padding:15px;border:1px #eee solid;border-radius:6px;overflow-x:auto;}
+        .my-cart{margin:15px;padding:15px;border:1px #eee solid;border-radius:6px;}
+        table{width:100%;border-collapse:collapse;min-width:500px;}
+        th,td{border:1px #ddd solid;padding:8px;text-align:center;}
+        th{background:#f8f9fa;}
+        .limit-tip{color:#f53f3f;font-weight:bold;}
+        .admin-tag{background:#ff6700;color:#fff;padding:2px 6px;border-radius:3px;font-size:12px;margin-left:6px;}
+        .msg-success{color:#19be6b;margin-top:10px;font-weight:bold;}
+    </style>
+</head>
+<body>
+<div class="container">
+    <div id="loginPage" class="login-box">
+        <h2>劳保用品选购系统</h2>
+        <input type="text" id="loginUser" placeholder="输入账号">
+        <br>
+        <input type="password" id="loginPwd" placeholder="输入密码">
+        <br>
+        <button onclick="login()">立即登录</button>
+        <p id="loginTip" style="color:red;margin-top:10px;"></p>
+    </div>
+
+    <div id="mainPage" class="hide">
+        <div class="header">
+            <span>当前账号：<span id="curUser"></span><span id="adminTag" class="admin-tag hide">管理员</span></span>
+            <span>个人总额：<span id="totalMoney">0</span> 元</span>
+            <div>
+                <button class="refresh-btn" onclick="refreshRecord()">刷新记录</button>
+                <button onclick="logout()">退出登录</button>
+            </div>
+        </div>
+
+        <div class="total-box">
+            <span id="limitTip">金额未满500元，可正常选购</span>
+        </div>
+
+        <div class="goods-wrap" id="goodsList"></div>
+
+        <div class="my-cart">
+            <h3>我的选购清单</h3>
+            <div id="cartList"></div>
+            <br>
+            <button class="submit-btn" onclick="submitCart()">提交选购完成</button>
+            <p id="submitMsg"></p>
+        </div>
+
+        <div id="adminRecordBox" class="record-box hide">
+            <button class="export-btn" onclick="exportExcel()">一键导出全部数据</button>
+            <h3>全员选购汇总记录</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>选购账号</th>
+                        <th>选购明细</th>
+                        <th>合计金额</th>
+                        <th>提交状态</th>
+                    </tr>
+                </thead>
+                <tbody id="recordTable"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+const userList = [
+    {account:"刘明君",pwd:"123456",isAdmin:true},
+    {account:"盛欣宇",pwd:"123456",isAdmin:false},
+    {account:"王敏",pwd:"123456",isAdmin:false}
+];
+const goodsData = [
+    {id:1,name:"纯棉劳保手套",price:15},
+    {id:2,name:"防砸安全鞋",price:89},
+    {id:3,name:"防尘口罩",price:8},
+    {id:4,name:"电焊防护面罩",price:68},
+    {id:5,name:"防静电工作服",price:128},
+    {id:6,name:"护目防护眼镜",price:32},
+    {id:7,name:"耐酸碱橡胶靴",price:75},
+    {id:8,name:"高空安全带",price:165},
+    {id:9,name:"降噪隔音耳罩",price:42},
+    {id:10,name:"防水劳保雨衣",price:56}
+];
+
+const MAX_MONEY = 500;
+let nowUser = "", userIsAdmin = false;
+
+// 本地永久存储（GitHub上线可用）
+function getAllData() {
+    let data = localStorage.getItem("laborAllData");
+    return data ? JSON.parse(data) : [];
+}
+function saveAllData(arr) {
+    localStorage.setItem("laborAllData", JSON.stringify(arr));
+}
+
+// 清空当前用户临时购物车（提交后用）
+function clearUserCart(user) {
+    let list = getAllData();
+    list = list.filter(i => !(i.user === user && !i.submitted));
+    saveAllData(list);
+}
+
+// 渲染商品
+function renderGoods(){
+    let html = "";
+    goodsData.forEach(item=>{
+        html += `<div class="goods-item">
+            <div class="goods-name">${item.name}</div>
+            <div class="price">${item.price}元</div>
+            <button onclick="buyGoods(${item.id},${item.price})">加入选购</button>
+        </div>`;
+    });
+    document.getElementById("goodsList").innerHTML = html;
+}
+
+// 合并购物车
+function mergeCart(user){
+    let list = getAllData().filter(i=>i.user===user && !i.submitted);
+    let obj = {};
+    list.forEach(i=>obj[i.goodsName]=(obj[i.goodsName]||0)+1);
+    return obj;
+}
+
+// 渲染购物车
+function renderCart(){
+    let cartObj = mergeCart(nowUser);
+    let html = "";
+    for(let name in cartObj){
+        let price = goodsData.find(g=>g.name===name).price;
+        html += `<p>${name} ×${cartObj[name]} 
+        <button class="del-btn" onclick="delGoods('${name}')">删除</button></p>`;
+    }
+    document.getElementById("cartList").innerHTML = html||"<p>暂无选购商品</p>";
+    document.getElementById("submitMsg").innerText = "";
+}
+
+// 获取用户总金额
+function getUserTotal(user){
+    let sum = 0;
+    getAllData().filter(i=>i.user===user && !i.submitted).forEach(i=>sum+=i.price);
+    return sum;
+}
+
+// 登录
+function login(){
+    let user = document.getElementById("loginUser").value.trim();
+    let pwd = document.getElementById("loginPwd").value.trim();
+    let tip = document.getElementById("loginTip");
+    if(!user||!pwd){tip.innerText="账号密码不能为空";return;}
+    let find = userList.find(u=>u.account===user&&u.pwd===pwd);
+    if(find){
+        nowUser = user;
+        userIsAdmin = find.isAdmin;
+        document.getElementById("loginPage").classList.add("hide");
+        document.getElementById("mainPage").classList.remove("hide");
+        document.getElementById("curUser").innerText = user;
+        document.getElementById("adminTag").classList.toggle("hide",!userIsAdmin);
+        document.getElementById("adminRecordBox").classList.toggle("hide",!userIsAdmin);
+        renderGoods();renderCart();updateTotal();renderRecord();
+        tip.innerText="";
+    }else{
+        tip.innerText="账号或密码错误";
+    }
+}
+
+// 退出
+function logout(){
+    nowUser = "";userIsAdmin = false;
+    document.getElementById("mainPage").classList.add("hide");
+    document.getElementById("loginPage").classList.remove("hide");
+    document.getElementById("loginUser").value="";
+    document.getElementById("loginPwd").value="";
+}
+
+// 加入选购
+function buyGoods(gid,price){
+    let total = getUserTotal(nowUser);
+    if(total+price>MAX_MONEY){alert("超出500元限额，无法选购");return;}
+    let name = goodsData.find(g=>g.id===gid).name;
+    let data = getAllData();
+    data.push({user:nowUser,goodsName:name,price,submitted:false});
+    saveAllData(data);
+    renderCart();updateTotal();renderRecord();
+}
+
+// 删除商品
+function delGoods(name){
+    let list = getAllData();
+    let idx = list.findIndex(i=>i.user===nowUser&&i.goodsName===name&&!i.submitted);
+    if(idx>-1){
+        list.splice(idx,1);
+        saveAllData(list);
+        renderCart();updateTotal();renderRecord();
+    }
+}
+
+// 刷新总额
+function updateTotal(){
+    let total = getUserTotal(nowUser);
+    document.getElementById("totalMoney").innerText = total;
+    let tip = document.getElementById("limitTip");
+    if(total>=MAX_MONEY){
+        tip.innerText="已达500元上限，禁止选购";
+        tip.className="limit-tip";
+    }else{
+        tip.innerText=`当前${total}元，未满500元可选购`;
+        tip.className="";
+    }
+}
+
+// 提交选购（上传到管理员可见）
+function submitCart() {
+    let total = getUserTotal(nowUser);
+    if (total === 0) {
+        alert("请先选购商品再提交！");
+        return;
+    }
+
+    let list = getAllData();
+    list.forEach(item => {
+        if (item.user === nowUser && !item.submitted) {
+            item.submitted = true;
+        }
+    });
+    saveAllData(list);
+
+    document.getElementById("submitMsg").innerText = "✅ 提交成功！管理员已收到你的选购清单";
+    document.getElementById("submitMsg").className = "msg-success";
+    renderCart();
+    updateTotal();
+    renderRecord();
+}
+
+// 管理员渲染所有记录
+function renderRecord(){
+    if(!userIsAdmin) return;
+    let allData = getAllData();
+    let users = [...new Set(allData.map(i=>i.user))];
+    let html = "";
+
+    users.forEach(u=>{
+        let submittedList = allData.filter(i=>i.user===u && i.submitted);
+        let unSubmittedList = allData.filter(i=>i.user===u && !i.submitted);
+
+        let cart = {};
+        submittedList.forEach(i=>cart[i.goodsName]=(cart[i.goodsName]||0)+1);
+        unSubmittedList.forEach(i=>cart[i.goodsName]=(cart[i.goodsName]||0)+1);
+
+        let str = [];
+        for(let k in cart) str.push(`${k}×${cart[k]}`);
+
+        let sum = 0;
+        allData.filter(i=>i.user===u).forEach(i=>sum+=i.price);
+
+        let hasSubmit = submittedList.length > 0;
+        let status = hasSubmit ? "✅ 已提交" : "⏳ 未提交";
+
+        html += `<tr>
+            <td>${u}</td>
+            <td>${str.join("、")||"无选购"}</td>
+            <td>${sum}元</td>
+            <td>${status}</td>
+        </tr>`;
+    });
+
+    document.getElementById("recordTable").innerHTML = html;
+}
+
+// 手动刷新
+function refreshRecord() {
+    renderCart();
+    renderRecord();
+    updateTotal();
+    alert("✅ 数据已刷新");
+}
+
+// 导出Excel
+function exportExcel(){
+    let allData = getAllData();
+    let users = [...new Set(allData.map(i=>i.user))];
+    let sheetData = [];
+
+    users.forEach(u=>{
+        let cart = {};
+        allData.filter(i=>i.user===u).forEach(i=>cart[i.goodsName]=(cart[i.goodsName]||0)+1);
+        let goodsStr = [];
+        for(let k in cart) goodsStr.push(`${k}×${cart[k]}`);
+        let sum = 0;
+        allData.filter(i=>i.user===u).forEach(i=>sum+=i.price);
+        sheetData.push({
+            选购账号:u,
+            选购明细:goodsStr.join("、")||"无",
+            合计金额:sum+"元",
+            提交状态:allData.some(i=>i.user===u&&i.submitted)?"已提交":"未提交"
+        });
+    });
+
+    let ws = XLSX.utils.json_to_sheet(sheetData);
+    let wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"选购数据");
+    XLSX.writeFile(wb,"劳保选购汇总数据.xlsx");
+}
+
+window.onload = function(){
+    renderGoods();
+}
+</script>
+</body>
+</html>
