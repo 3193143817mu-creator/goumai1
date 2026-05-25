@@ -91,8 +91,8 @@
 </div>
 
 <script>
-// 替换为你的data.json Raw原始链接
-const jsonUrl = "https://raw.githubusercontent.com/3193143817mu-creator/goumai1/refs/heads/main/data.json";
+// 替换为你的data.json Raw链接
+const jsonUrl = "https://github.com/3193143817mu-creator/goumai1/blob/main/data.json";
 const userList = [
     {account:"刘明君",pwd:"123456",isAdmin:true},
     {account:"盛欣宇",pwd:"123456",isAdmin:false},
@@ -113,18 +113,25 @@ const goodsData = [
 const MAX_MONEY = 500;
 let nowUser = "", userIsAdmin = false;
 let globalData = [];
+// 本地临时购物车，独立存储，提交不清空额度
+let tempCart = [];
 
-// 获取云端共享数据
 async function fetchCloudData(){
     try{
-        const res = await fetch(jsonUrl+"?t="+Date.now());
-        globalData = await res.json();
+        const res = await fetch(jsonUrl,{
+            cache:"no-cache",
+            mode:"cors"
+        });
+        if(res.ok){
+            globalData = await res.json();
+        }else{
+            globalData = [];
+        }
     }catch(e){
         globalData = [];
     }
 }
 
-// 渲染商品
 function renderGoods(){
     let html = "";
     goodsData.forEach(item=>{
@@ -137,17 +144,14 @@ function renderGoods(){
     document.getElementById("goodsList").innerHTML = html;
 }
 
-// 合并当前用户未提交购物车
-function mergeCart(user){
-    let list = globalData.filter(i=>i.user===user && !i.submitted);
+function mergeCart(){
     let obj = {};
-    list.forEach(i=>obj[i.goodsName]=(obj[i.goodsName]||0)+1);
+    tempCart.forEach(i=>obj[i.goodsName]=(obj[i.goodsName]||0)+1);
     return obj;
 }
 
-// 渲染购物车
 function renderCart(){
-    let cartObj = mergeCart(nowUser);
+    let cartObj = mergeCart();
     let html = "";
     for(let name in cartObj){
         let price = goodsData.find(g=>g.name===name).price;
@@ -158,14 +162,13 @@ function renderCart(){
     document.getElementById("submitMsg").innerText = "";
 }
 
-// 统计用户金额
-function getUserTotal(user){
+// 统计当前实际选购总额，提交后数值保持不变
+function getCurrentTotal(){
     let sum = 0;
-    globalData.filter(i=>i.user===user && !i.submitted).forEach(i=>sum+=i.price);
+    tempCart.forEach(item=>sum += item.price);
     return sum;
 }
 
-// 登录
 async function login(){
     let user = document.getElementById("loginUser").value.trim();
     let pwd = document.getElementById("loginPwd").value.trim();
@@ -175,6 +178,7 @@ async function login(){
     if(find){
         nowUser = user;
         userIsAdmin = find.isAdmin;
+        tempCart = [];
         await fetchCloudData();
         document.getElementById("loginPage").classList.add("hide");
         document.getElementById("mainPage").classList.remove("hide");
@@ -188,36 +192,34 @@ async function login(){
     }
 }
 
-// 退出登录
 function logout(){
-    nowUser = "";userIsAdmin = false;
+    nowUser = "";
+    userIsAdmin = false;
+    tempCart = [];
     document.getElementById("mainPage").classList.add("hide");
     document.getElementById("loginPage").classList.remove("hide");
     document.getElementById("loginUser").value="";
     document.getElementById("loginPwd").value="";
 }
 
-// 添加商品
 function buyGoods(gid,price){
-    let total = getUserTotal(nowUser);
+    let total = getCurrentTotal();
     if(total+price>MAX_MONEY){alert("超出500元限额，无法选购");return;}
     let name = goodsData.find(g=>g.id===gid).name;
-    globalData.push({user:nowUser,goodsName:name,price,submitted:false});
-    renderCart();updateTotal();renderRecord();
+    tempCart.push({user:nowUser,goodsName:name,price,submitted:false});
+    renderCart();updateTotal();
 }
 
-// 删除商品
 function delGoods(name){
-    let idx = globalData.findIndex(i=>i.user===nowUser&&i.goodsName===name&&!i.submitted);
+    let idx = tempCart.findIndex(i=>i.goodsName===name);
     if(idx>-1){
-        globalData.splice(idx,1);
-        renderCart();updateTotal();renderRecord();
+        tempCart.splice(idx,1);
+        renderCart();updateTotal();
     }
 }
 
-// 更新金额显示
 function updateTotal(){
-    let total = getUserTotal(nowUser);
+    let total = getCurrentTotal();
     document.getElementById("totalMoney").innerText = total;
     let tip = document.getElementById("limitTip");
     if(total>=MAX_MONEY){
@@ -229,40 +231,36 @@ function updateTotal(){
     }
 }
 
-// 提交选购标记
 async function submitCart() {
-    let total = getUserTotal(nowUser);
+    let total = getCurrentTotal();
     if (total === 0) {
         alert("请先选购商品再提交！");
         return;
     }
-    globalData.forEach(item => {
-        if (item.user === nowUser && !item.submitted) {
-            item.submitted = true;
-        }
+    // 合并到全局数据归档
+    tempCart.forEach(item=>{
+        item.submitted = true;
+        globalData.push(item);
     });
-    document.getElementById("submitMsg").innerText = "✅ 提交成功，数据已同步";
+    document.getElementById("submitMsg").innerText = "✅ 提交成功，数据已归档";
     document.getElementById("submitMsg").className = "msg-success";
-    renderCart();
-    updateTotal();
     renderRecord();
 }
 
-// 管理员展示全部记录
 function renderRecord(){
     if(!userIsAdmin) return;
     let users = [...new Set(globalData.map(i=>i.user))];
     let html = "";
     users.forEach(u=>{
-        let submittedList = globalData.filter(i=>i.user===u && i.submitted);
-        let allList = globalData.filter(i=>i.user===u);
+        let userAllData = globalData.filter(i=>i.user===u);
         let cart = {};
-        allList.forEach(i=>cart[i.goodsName]=(cart[i.goodsName]||0)+1);
+        userAllData.forEach(i=>cart[i.goodsName]=(cart[i.goodsName]||0)+1);
         let str = [];
         for(let k in cart) str.push(`${k}×${cart[k]}`);
         let sum = 0;
-        allList.forEach(i=>sum+=i.price);
-        let status = submittedList.length>0 ? "✅ 已提交" : "⏳ 未提交";
+        userAllData.forEach(i=>sum+=i.price);
+        let hasSubmit = userAllData.some(i=>i.submitted === true);
+        let status = hasSubmit ? "✅ 已提交" : "⏳ 未提交";
         html += `<tr>
             <td>${u}</td>
             <td>${str.join("、")||"无选购"}</td>
@@ -273,27 +271,24 @@ function renderRecord(){
     document.getElementById("recordTable").innerHTML = html;
 }
 
-// 手动刷新云端数据
 async function refreshRecord() {
     await fetchCloudData();
-    renderCart();
     renderRecord();
-    updateTotal();
     alert("✅ 已拉取最新共享数据");
 }
 
-// 导出表格
 function exportExcel(){
     let users = [...new Set(globalData.map(i=>i.user))];
     let sheetData = [];
     users.forEach(u=>{
+        let userAllData = globalData.filter(i=>i.user===u);
         let cart = {};
-        globalData.filter(i=>i.user===u).forEach(i=>cart[i.goodsName]=(cart[i.goodsName]||0)+1);
+        userAllData.forEach(i=>cart[i.goodsName]=(cart[i.goodsName]||0)+1);
         let goodsStr = [];
         for(let k in cart) goodsStr.push(`${k}×${cart[k]}`);
         let sum = 0;
-        globalData.filter(i=>i.user===u).forEach(i=>sum+=i.price);
-        let hasSub = globalData.some(i=>i.user===u&&i.submitted);
+        userAllData.forEach(i=>sum+=i.price);
+        let hasSub = userAllData.some(i=>i.submitted);
         sheetData.push({
             选购账号:u,
             选购明细:goodsStr.join("、")||"无",
